@@ -1,0 +1,24 @@
+services:
+  tanss-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tanss-mcp-server-v2
+    environment:
+      - TANSS_API_BASE_URL=${TANSS_API_BASE_URL:-https://api.tanss.de}
+      - TANSS_API_KEY=${TANSS_API_KEY}
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - tanss-mcp-network
+
+networks:
+  tanss-mcp-network:
+    driver: bridge
+
