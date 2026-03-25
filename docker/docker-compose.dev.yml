@@ -1,0 +1,89 @@
+# =============================================================================
+# Dev-Override: Zusätzliche Services und entspannte Einstellungen für Entwicklung
+# Verwendung: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# NIEMALS in Produktion einsetzen!
+# =============================================================================
+
+name: tanss-rag-stack
+
+services:
+
+  # Supabase Studio – nur für Entwicklung!
+  supabase-studio:
+    image: supabase/studio:2024.11.04-sha-ab9a33c
+    container_name: tanss-studio
+    restart: unless-stopped
+    environment:
+      STUDIO_PG_META_URL:         http://meta:8080
+      POSTGRES_PASSWORD:          ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME:  TANSS RAG Dev
+      DEFAULT_PROJECT_NAME:       tanss-rag
+      SUPABASE_URL:               http://kong:8000
+      SUPABASE_ANON_KEY:          ${ANON_KEY}
+      SUPABASE_SERVICE_KEY:       ${SERVICE_ROLE_KEY}
+      LOGFLARE_API_KEY:           ""
+      NEXT_PUBLIC_ENABLE_LOGS:    "false"
+    ports:
+      - "127.0.0.1:54323:3000"   # Nur auf Loopback – kein Netzwerkzugang
+    networks:
+      - backend
+    depends_on:
+      - meta
+      - kong
+
+  # PostgreSQL direkt auf lokalem Port (nur für pgAdmin/psql im Dev)
+  postgres:
+    ports:
+      - "127.0.0.1:54322:5432"   # Nur Loopback!
+
+  # n8n im Dev-Modus ohne HTTPS
+  n8n:
+    environment:
+      N8N_PROTOCOL:           http
+      N8N_BASIC_AUTH_ACTIVE:  "false"   # Im Dev kein Auth nötig
+      N8N_LOG_LEVEL:          debug
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
+    ports:
+      - "127.0.0.1:5678:5678"   # Direktzugang auf Loopback
+
+  # Nginx im Dev – kein TLS
+  nginx:
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+
+  # pgAdmin für einfache DB-Verwaltung
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: tanss-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL:    ${PGADMIN_EMAIL:-admin@local.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "127.0.0.1:54324:80"
+    networks:
+      - database
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+
+  # Mailhog – E-Mail-Catching für Auth-Tests
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: tanss-mailhog
+    restart: unless-stopped
+    networks:
+      - backend
+    ports:
+      - "127.0.0.1:8025:8025"   # Web-UI
+
+volumes:
+  pgadmin-data:
+
+networks:
+  frontend:
+  backend:
+  database:

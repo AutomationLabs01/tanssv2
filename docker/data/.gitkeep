@@ -1,0 +1,5 @@
+# Datenpersistenz-Verzeichnis (wird von generate-secrets.sh angelegt).
+# Inhalte:
+#   postgres/   PostgreSQL Daten-Cluster
+#   n8n/        n8n Workflows und Credentials
+#   storage/    Supabase Storage Dateien

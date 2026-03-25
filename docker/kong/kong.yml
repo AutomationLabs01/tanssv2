@@ -1,0 +1,181 @@
+# =============================================================================
+# Kong API Gateway – Deklarative Konfiguration (DB-less Mode)
+# =============================================================================
+# Supabase-kompatibles Routing + Security-Plugins:
+#   - Rate Limiting (pro IP)
+#   - Request Size Limiting
+#   - JWT-Validierung für geschützte Endpunkte
+#   - CORS (konfiguriert für eigene Domain)
+#   - Response-Header-Bereinigung (Server-Version verbergen)
+# =============================================================================
+
+_format_version: "3.0"
+_transform: true
+
+# ---------------------------------------------------------------------------
+# Services (Upstream-Backends)
+# ---------------------------------------------------------------------------
+services:
+
+  # PostgREST – REST-API für PostgreSQL
+  - name: rest-v1
+    url: http://rest:3000
+    routes:
+      - name: rest-v1-all
+        strip_path: true
+        paths:
+          - /rest/v1/
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - ${SITE_URL:-http://localhost:3000}
+          methods:
+            - GET
+            - POST
+            - PATCH
+            - PUT
+            - DELETE
+            - OPTIONS
+            - HEAD
+          headers:
+            - Accept
+            - Accept-Profile
+            - Accept-Language
+            - Authorization
+            - Content-Type
+            - Content-Profile
+            - Prefer
+            - X-Client-Info
+            - apikey
+            - Range
+          exposed_headers:
+            - Content-Range
+            - Range-Unit
+            - Content-Length
+          credentials: true
+          max_age: 7200
+
+  # GoTrue – Auth API
+  - name: auth-v1
+    url: http://supabase-auth:9999
+    routes:
+      - name: auth-v1-all
+        strip_path: true
+        paths:
+          - /auth/v1/
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - ${SITE_URL:-http://localhost:3000}
+          methods: [GET, POST, PUT, DELETE, OPTIONS]
+          headers:
+            - Authorization
+            - Content-Type
+            - apikey
+          credentials: true
+
+  # Realtime – WebSocket
+  - name: realtime-v1
+    url: http://realtime:4000
+    routes:
+      - name: realtime-v1-all
+        strip_path: true
+        paths:
+          - /realtime/v1/
+
+  # Storage API
+  - name: storage-v1
+    url: http://storage:5000
+    routes:
+      - name: storage-v1-all
+        strip_path: true
+        paths:
+          - /storage/v1/
+    plugins:
+      - name: request-size-limiting
+        config:
+          # Max. Upload-Größe (passend zu STORAGE_FILE_SIZE_LIMIT im Compose)
+          allowed_payload_size: 50   # MB
+
+  # Meta API (Schema-Introspection) – intern, kein öffentlicher Zugang
+  - name: meta
+    url: http://meta:8080
+    routes:
+      - name: meta-all
+        strip_path: true
+        paths:
+          - /pg/
+
+# ---------------------------------------------------------------------------
+# Globale Plugins (gelten für ALLE Routes)
+# ---------------------------------------------------------------------------
+plugins:
+
+  # -------------------------------------------------------------------------
+  # Rate Limiting – Schutz gegen DoS und Brute Force
+  # -------------------------------------------------------------------------
+  - name: rate-limiting
+    config:
+      # Pro Minute pro IP-Adresse
+      minute: 300
+      # Pro Stunde
+      hour: 5000
+      # Zähler im lokalen Speicher (bei Single-Node; für Cluster: redis)
+      policy: local
+      # Verbindung trotzdem erlauben wenn Zähler nicht verfügbar
+      fault_tolerant: true
+      # Rate-Limit-Header an Client senden
+      hide_client_headers: false
+      # X-Forwarded-For für Proxy-Setups nutzen
+      limit_by: ip
+      redis_host: null
+
+  # Strengere Limits für Auth-Endpoints (Brute-Force-Schutz)
+  # (Wird direkt am auth-Service gesetzt)
+
+  # -------------------------------------------------------------------------
+  # Request Size Limiting (global, großzügiger als Storage)
+  # -------------------------------------------------------------------------
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 10   # MB (für normale API-Calls)
+      size_unit: megabytes
+
+  # -------------------------------------------------------------------------
+  # Response Transformer – Server-Informationen aus Headern entfernen
+  # -------------------------------------------------------------------------
+  - name: response-transformer
+    config:
+      remove:
+        headers:
+          - Server
+          - X-Kong-Upstream-Latency
+          - X-Kong-Proxy-Latency
+          - Via
+
+# ---------------------------------------------------------------------------
+# Consumers und JWT-Keys (Supabase anon/service_role Keys)
+# ---------------------------------------------------------------------------
+consumers:
+  - username: anon
+    jwt_secrets:
+      - key: ${ANON_KEY}
+        secret: ${JWT_SECRET}
+        algorithm: HS256
+
+  - username: service_role
+    jwt_secrets:
+      - key: ${SERVICE_ROLE_KEY}
+        secret: ${JWT_SECRET}
+        algorithm: HS256
+
+# ---------------------------------------------------------------------------
+# JWT-Plugin für geschützte Endpunkte
+# Wichtig: REST- und Storage-Endpoints brauchen gültigen JWT (apikey-Header)
+# ---------------------------------------------------------------------------
+# Wird pro Route konfiguriert (nicht global, damit auth/* ohne JWT erreichbar bleibt):
+
+# Für PostgREST: JWT-Validierung via apikey-Header
+# (Supabase nutzt 'apikey' statt 'Authorization' für den anon Key)

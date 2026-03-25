@@ -1,0 +1,594 @@
+# =============================================================================
+# TANSS → S1 RAG Stack – Security-gehärtetes Docker Compose
+# =============================================================================
+#
+# Services:
+#   - postgres      PostgreSQL 16 + pgvector (hardened, SSL-only)
+#   - kong          API Gateway (Rate Limiting, JWT-Validierung, CORS)
+#   - supabase-auth GoTrue – Authentifizierung
+#   - rest          PostgREST – Auto-REST-API auf PostgreSQL
+#   - realtime      Supabase Realtime (Websockets)
+#   - storage       Supabase Storage API
+#   - meta          Supabase Meta (Schema-Introspection)
+#   - n8n           Workflow-Automatisierung
+#   - tanss-mcp     TANSS MCP-Server (aus v2/)
+#   - nginx         Reverse Proxy + TLS-Termination (Edge)
+#
+# Netzwerke (Segmentierung):
+#   frontend  → nginx, n8n                          (internet-facing)
+#   backend   → Kong, Auth, REST, Realtime, Storage  (intern)
+#   database  → postgres, rest, auth, meta           (DB-only)
+#
+# Starten:  ./scripts/generate-secrets.sh && docker compose up -d
+# Logs:     docker compose logs -f [service]
+# =============================================================================
+
+name: tanss-rag-stack
+
+# ---------------------------------------------------------------------------
+# Gemeinsame Basis-Konfigurationen (YAML-Anchors)
+# ---------------------------------------------------------------------------
+x-security-defaults: &security-defaults
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-logging: &logging-defaults
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+    tag: "{{.Name}}"
+
+x-restart: &restart-policy
+  restart: unless-stopped
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16 + pgvector
+  # Härtung: SSL-only, scram-sha-256, least-privilege Rollen,
+  #           kein superuser-Login von außen, connection limits
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: supabase/postgres:15.8.1.060
+    container_name: tanss-postgres
+    <<: [*security-defaults, *restart-policy]
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-postgres}
+      POSTGRES_USER:     ${POSTGRES_USER:-supabase_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Postgres-Passwort muss gesetzt sein}
+      # Kein POSTGRES_HOST_AUTH_METHOD – wird über pg_hba.conf gesteuert
+      JWT_SECRET:        ${JWT_SECRET:?JWT-Secret muss gesetzt sein}
+      JWT_EXP:           ${JWT_EXP:-3600}
+    volumes:
+      # Persistente Daten
+      - postgres-data:/var/lib/postgresql/data
+      # Gehärtete Konfig-Dateien (read-only im Container)
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      # Initialisierungs-SQL (nur beim ersten Start ausgeführt)
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      # SSL-Zertifikate
+      - ./secrets/server.crt:/var/lib/postgresql/server.crt:ro
+      - ./secrets/server.key:/var/lib/postgresql/server.key:ro
+    networks:
+      - database
+    # Kein Port nach außen – nur über internes Netzwerk erreichbar
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-supabase_admin} -d ${POSTGRES_DB:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # Kong – API Gateway
+  # Härtung: Rate Limiting, Request-Size-Limit, JWT-Check, kein Admin-Port extern
+  # ---------------------------------------------------------------------------
+  kong:
+    image: kong:3.6-alpine
+    container_name: tanss-kong
+    <<: [*security-defaults, *restart-policy]
+    environment:
+      KONG_DATABASE:            "off"
+      KONG_DECLARATIVE_CONFIG:  /etc/kong/kong.yml
+      KONG_DNS_ORDER:           LAST,A,CNAME
+      KONG_PLUGINS:             request-transformer,cors,key-auth,acl,basic-auth,jwt,rate-limiting,response-transformer,http-log
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE:     160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS:         64 160k
+      # Logging – kein sensitiver Body-Content
+      KONG_LOG_LEVEL:           warn
+      KONG_PROXY_ACCESS_LOG:    /dev/stdout
+      KONG_ADMIN_ACCESS_LOG:    /dev/null
+      KONG_PROXY_ERROR_LOG:     /dev/stderr
+      KONG_ADMIN_ERROR_LOG:     /dev/stderr
+      # Admin API nur auf Loopback (kein externer Zugriff)
+      KONG_ADMIN_LISTEN:        "127.0.0.1:8001"
+    volumes:
+      - ./kong/kong.yml:/etc/kong/kong.yml:ro
+    networks:
+      - backend
+      - frontend
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # Supabase Auth (GoTrue)
+  # ---------------------------------------------------------------------------
+  supabase-auth:
+    image: supabase/gotrue:v2.151.0
+    container_name: tanss-auth
+    <<: [*security-defaults, *restart-policy]
+    environment:
+      GOTRUE_API_HOST:                  "0.0.0.0"
+      GOTRUE_API_PORT:                  "9999"
+      API_EXTERNAL_URL:                 ${API_EXTERNAL_URL:?API_EXTERNAL_URL muss gesetzt sein}
+      GOTRUE_DB_DRIVER:                 postgres
+      GOTRUE_DB_DATABASE_URL:           "postgresql://${POSTGRES_USER:-supabase_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-postgres}?search_path=auth&sslmode=verify-ca&sslrootcert=/etc/ssl/certs/ca.crt"
+      GOTRUE_SITE_URL:                  ${SITE_URL:-http://localhost:3000}
+      GOTRUE_JWT_SECRET:                ${JWT_SECRET}
+      GOTRUE_JWT_EXP:                   ${JWT_EXP:-3600}
+      GOTRUE_JWT_DEFAULT_GROUP_NAME:    authenticated
+      GOTRUE_DISABLE_SIGNUP:            ${DISABLE_SIGNUP:-false}
+      GOTRUE_MAILER_AUTOCONFIRM:        ${MAILER_AUTOCONFIRM:-false}
+      GOTRUE_SMTP_HOST:                 ${SMTP_HOST:-}
+      GOTRUE_SMTP_PORT:                 ${SMTP_PORT:-587}
+      GOTRUE_SMTP_USER:                 ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS:                 ${SMTP_PASS:-}
+      GOTRUE_SMTP_SENDER_NAME:          ${SMTP_SENDER_NAME:-TANSS RAG}
+      GOTRUE_MAILER_URLPATHS_INVITE:    ${MAILER_URLPATHS_INVITE:-/auth/v1/verify}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION:-/auth/v1/verify}
+      GOTRUE_MAILER_URLPATHS_RECOVERY:  ${MAILER_URLPATHS_RECOVERY:-/auth/v1/verify}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE:-/auth/v1/verify}
+      # Brute-Force-Schutz
+      GOTRUE_RATE_LIMIT_HEADER:         X-Forwarded-For
+      GOTRUE_RATE_LIMIT_EMAIL_SENT:     5
+      # Keine externen OAuth-Provider standardmäßig
+      GOTRUE_EXTERNAL_GITHUB_ENABLED:   false
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED:   false
+    volumes:
+      - ./secrets/ca.crt:/etc/ssl/certs/ca.crt:ro
+    networks:
+      - backend
+      - database
+    expose:
+      - "9999"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # PostgREST – Auto-REST-API
+  # ---------------------------------------------------------------------------
+  rest:
+    image: postgrest/postgrest:v12.0.2
+    container_name: tanss-rest
+    <<: [*security-defaults, *restart-policy]
+    environment:
+      PGRST_DB_URI:             "postgresql://authenticator:${POSTGRES_PASSWORD_AUTHENTICATOR:?Authenticator-Passwort muss gesetzt sein}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=verify-ca&sslrootcert=/etc/ssl/certs/ca.crt"
+      PGRST_DB_SCHEMAS:         "public,storage,graphql_public"
+      PGRST_DB_ANON_ROLE:       anon
+      PGRST_JWT_SECRET:         ${JWT_SECRET}
+      PGRST_JWT_SECRET_IS_BASE64: "false"
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      # Nur benötigte Schemas exponieren
+      PGRST_DB_EXTRA_SEARCH_PATH: "public"
+      # Kein offenes Schema-Listing
+      PGRST_OPENAPI_SERVER_PROXY_URI: ""
+      # Max. Connections begrenzen
+      PGRST_DB_POOL:            10
+      PGRST_DB_POOL_ACQUISITION_TIMEOUT: 10
+      # Server-Timing-Header nicht exponieren
+      PGRST_SERVER_TIMING_ENABLED: "false"
+    volumes:
+      - ./secrets/ca.crt:/etc/ssl/certs/ca.crt:ro
+    networks:
+      - backend
+      - database
+    expose:
+      - "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # Supabase Realtime
+  # ---------------------------------------------------------------------------
+  realtime:
+    image: supabase/realtime:v2.30.17
+    container_name: tanss-realtime
+    <<: [*security-defaults, *restart-policy]
+    environment:
+      PORT:                    "4000"
+      DB_HOST:                 postgres
+      DB_PORT:                 "5432"
+      DB_USER:                 supabase_admin
+      DB_PASSWORD:             ${POSTGRES_PASSWORD}
+      DB_NAME:                 ${POSTGRES_DB:-postgres}
+      DB_AFTER_CONNECT_QUERY:  "SET search_path TO _realtime"
+      DB_ENC_KEY:              ${REALTIME_DB_ENC_KEY:?Realtime-Enc-Key muss gesetzt sein}
+      API_JWT_SECRET:          ${JWT_SECRET}
+      FLY_ALLOC_ID:            local
+      FLY_APP_NAME:            tanss-realtime
+      SECRET_KEY_BASE:         ${SECRET_KEY_BASE:?Secret-Key-Base muss gesetzt sein}
+      ERL_AFLAGS:              "-proto_dist inet_tcp"
+      ENABLE_TAILSCALE:        "false"
+      DNS_NODES:               "''"
+      # SSL
+      DB_SSL:                  "true"
+    networks:
+      - backend
+      - database
+    expose:
+      - "4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "printf \\0 > /dev/tcp/localhost/4000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # Supabase Storage
+  # ---------------------------------------------------------------------------
+  storage:
+    image: supabase/storage-api:v1.0.6
+    container_name: tanss-storage
+    <<: [*security-defaults, *restart-policy]
+    environment:
+      ANON_KEY:                   ${ANON_KEY:?Anon-Key muss gesetzt sein}
+      SERVICE_KEY:                ${SERVICE_ROLE_KEY:?Service-Role-Key muss gesetzt sein}
+      POSTGREST_URL:              http://rest:3000
+      PGRST_JWT_SECRET:           ${JWT_SECRET}
+      DATABASE_URL:               "postgresql://supabase_storage_admin:${POSTGRES_PASSWORD_STORAGE:?Storage-Passwort muss gesetzt sein}@postgres:5432/${POSTGRES_DB:-postgres}?sslmode=verify-ca&sslrootcert=/etc/ssl/certs/ca.crt"
+      FILE_SIZE_LIMIT:            ${STORAGE_FILE_SIZE_LIMIT:-52428800}
+      STORAGE_BACKEND:            file
+      FILE_STORAGE_BACKEND_PATH:  /var/lib/storage
+      TENANT_ID:                  stub
+      REGION:                     stub
+      GLOBAL_S3_BUCKET:           stub
+      IS_MULTITENANT:             "false"
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage-data:/var/lib/storage
+      - ./secrets/ca.crt:/etc/ssl/certs/ca.crt:ro
+    networks:
+      - backend
+      - database
+    expose:
+      - "5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rest:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Supabase Meta (Schema-Introspection für Studio)
+  # ---------------------------------------------------------------------------
+  meta:
+    image: supabase/postgres-meta:v0.83.2
+    container_name: tanss-meta
+    <<: [*security-defaults, *restart-policy]
+    environment:
+      PG_META_PORT:       "8080"
+      PG_META_DB_HOST:    postgres
+      PG_META_DB_PORT:    "5432"
+      PG_META_DB_NAME:    ${POSTGRES_DB:-postgres}
+      PG_META_DB_USER:    supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      PG_META_DB_SSL_MODE: verify-ca
+      PG_META_DB_SSL_ROOT_CERT: /etc/ssl/certs/ca.crt
+    volumes:
+      - ./secrets/ca.crt:/etc/ssl/certs/ca.crt:ro
+    networks:
+      - backend
+      - database
+    expose:
+      - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64M
+
+  # ---------------------------------------------------------------------------
+  # n8n – Workflow-Automatisierung
+  # Härtung: Non-root, eigenes DB-Schema, kein direkter DB-Admin-Zugang
+  # ---------------------------------------------------------------------------
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: tanss-n8n
+    user: "1000:1000"
+    <<: [*security-defaults, *restart-policy]
+    environment:
+      # Datenbank – eigenes Schema in PostgreSQL
+      DB_TYPE:             postgresdb
+      DB_POSTGRESDB_HOST:  postgres
+      DB_POSTGRESDB_PORT:  "5432"
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-postgres}
+      DB_POSTGRESDB_SCHEMA:   n8n
+      DB_POSTGRESDB_USER:     n8n_user
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD_N8N:?n8n-Datenbankpasswort muss gesetzt sein}
+      DB_POSTGRESDB_SSL_ENABLED:   "true"
+      DB_POSTGRESDB_SSL_CA:        /etc/ssl/certs/ca.crt
+      # n8n Basis-Konfiguration
+      N8N_HOST:            ${N8N_HOST:-localhost}
+      N8N_PORT:            "5678"
+      N8N_PROTOCOL:        ${N8N_PROTOCOL:-https}
+      WEBHOOK_URL:         ${WEBHOOK_URL:?Webhook-URL muss gesetzt sein}
+      N8N_ENCRYPTION_KEY:  ${N8N_ENCRYPTION_KEY:?Encryption-Key muss gesetzt sein}
+      # Sicherheit
+      N8N_BASIC_AUTH_ACTIVE:    "true"
+      N8N_BASIC_AUTH_USER:      ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD:  ${N8N_BASIC_AUTH_PASSWORD:?n8n-Passwort muss gesetzt sein}
+      N8N_USER_MANAGEMENT_JWT_SECRET: ${JWT_SECRET}
+      # Logging (keine sensitiven Daten)
+      N8N_LOG_LEVEL:       warn
+      N8N_LOG_OUTPUT:      console
+      # Executionen nicht ewig aufbewahren (DSGVO)
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS:  all
+      EXECUTIONS_DATA_SAVE_ON_ERROR:    all
+      EXECUTIONS_DATA_MAX_AGE:          336
+      EXECUTIONS_DATA_PRUNE:            "true"
+      # Externe Secrets (Umgebungsvariablen für Workflow-Nodes)
+      TANSS_BASE_URL:       ${TANSS_BASE_URL}
+      TANSS_USERNAME:       ${TANSS_USERNAME}
+      TANSS_PASSWORD:       ${TANSS_PASSWORD}
+      S1_BASE_URL:          ${S1_BASE_URL}
+      S1_USERNAME:          ${S1_USERNAME}
+      S1_PASSWORD:          ${S1_PASSWORD}
+      S1_COMPANY_DB:        ${S1_COMPANY_DB}
+      S1_DEFAULT_TAX_CODE:  ${S1_DEFAULT_TAX_CODE:-T1}
+      SUPABASE_URL:         ${SUPABASE_INTERNAL_URL:-http://kong:8000}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      OPENAI_API_KEY:       ${OPENAI_API_KEY}
+      SLACK_WEBHOOK_URL:    ${SLACK_WEBHOOK_URL:-}
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./secrets/ca.crt:/etc/ssl/certs/ca.crt:ro
+    networks:
+      - frontend
+      - backend
+    expose:
+      - "5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kong:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # TANSS MCP Server (aus v2/)
+  # ---------------------------------------------------------------------------
+  tanss-mcp:
+    build:
+      context: ../v2
+      dockerfile: Dockerfile
+    container_name: tanss-mcp-server
+    user: "1000:1000"
+    <<: [*security-defaults, *restart-policy]
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+    environment:
+      TANSS_API_BASE_URL: ${TANSS_BASE_URL}
+      TANSS_API_KEY:      ${TANSS_API_KEY:-}
+    networks:
+      - backend
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Nginx – Reverse Proxy, TLS-Termination, Security-Headers
+  # Einziger öffentlich exponierter Service
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: tanss-nginx
+    <<: [*security-defaults, *restart-policy]
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:noexec,nosuid,size=64m
+      - /var/run:noexec,nosuid,size=8m
+      - /tmp:noexec,nosuid,size=32m
+    cap_add:
+      - NET_BIND_SERVICE    # Für Port 80/443 als non-root
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./secrets/cert.pem:/etc/nginx/ssl/cert.pem:ro
+      - ./secrets/key.pem:/etc/nginx/ssl/key.pem:ro
+    networks:
+      - frontend
+    ports:
+      - "80:80"     # HTTP → HTTPS-Redirect
+      - "443:443"   # HTTPS (Supabase API + n8n)
+    depends_on:
+      kong:
+        condition: service_healthy
+      n8n:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *logging-defaults
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}/postgres
+  n8n-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}/n8n
+  storage-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}/storage
+
+# ---------------------------------------------------------------------------
+# Netzwerke (Segmentierung)
+# ---------------------------------------------------------------------------
+networks:
+  # Öffentlich: nginx + n8n (n8n braucht Webhook-Zugang)
+  frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+    driver_opts:
+      com.docker.network.bridge.name: tanss-frontend
+
+  # Intern: alle Supabase-Services, n8n → Kong
+  backend:
+    driver: bridge
+    internal: false   # Kong muss nach außen für Callbacks
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+    driver_opts:
+      com.docker.network.bridge.name: tanss-backend
+
+  # DB-only: PostgreSQL + direkte DB-Clients (PostgREST, Auth, Meta)
+  database:
+    driver: bridge
+    internal: true    # KEIN Internet-Zugang – strikt isoliert
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
+    driver_opts:
+      com.docker.network.bridge.name: tanss-database
