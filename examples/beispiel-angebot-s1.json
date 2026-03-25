@@ -1,0 +1,118 @@
+{
+  "_beschreibung": "Vollständiger SAP B1 Service Layer Quotation Payload, der aus dem Beispiel-Kommentar generiert wird.",
+  "_endpunkt": "POST /b1s/v2/Quotations",
+  "_header": {
+    "Cookie": "B1SESSION=abc123def456; ROUTEID=.node1",
+    "Content-Type": "application/json"
+  },
+
+  "_request_payload": {
+    "CardCode": "C00042",
+    "DocDate": "2026-03-25",
+    "DocDueDate": "2026-04-25",
+    "Comments": "Automatisch erstellt aus TANSS Ticket #12345\nErstellt von: Max Mustermann\n\nRAG-Hinweis (Vollständigkeit: 55%):\nGgf. fehlend: Logitech MK270 Tastatur+Maus (KRITISCH), HDMI-Kabel 2m (EMPFOHLEN)",
+    "SalesPersonCode": 1,
+    "DocumentLines": [
+      {
+        "LineNum": 0,
+        "ItemDescription": "Dell OptiPlex 7020 Desktop PC (Intel Core i5-13500, 16GB RAM, 512GB NVMe SSD, Windows 11 Pro)",
+        "Quantity": 5,
+        "UnitPrice": 899.00,
+        "TaxCode": "T1",
+        "WarehouseCode": "01"
+      },
+      {
+        "LineNum": 1,
+        "ItemDescription": "Dell P2425H 24\" FHD IPS Monitor (HDMI, DisplayPort, USB-Hub)",
+        "Quantity": 5,
+        "UnitPrice": 229.00,
+        "TaxCode": "T1",
+        "WarehouseCode": "01"
+      },
+      {
+        "LineNum": 2,
+        "ItemDescription": "Microsoft 365 Business Standard - Jahresabonnement (pro User/Jahr)",
+        "Quantity": 5,
+        "UnitPrice": 143.40,
+        "TaxCode": "T1",
+        "WarehouseCode": "01"
+      },
+      {
+        "LineNum": 3,
+        "ItemDescription": "Einrichtungspauschale (5 Arbeitsplätze): Domain-Join, Software-Setup, Benutzerkonfiguration",
+        "Quantity": 1,
+        "UnitPrice": 450.00,
+        "TaxCode": "T1",
+        "WarehouseCode": "01"
+      }
+    ],
+    "UserDefinedFields": {
+      "U_TANSS_TicketID": "12345",
+      "U_RAG_Score": "0.55",
+      "U_Erstellt_Durch": "n8n-automatisierung"
+    }
+  },
+
+  "_response_erfolg": {
+    "odata.metadata": "https://server:50000/b1s/v2/$metadata#Quotations/@Element",
+    "DocEntry": 5678,
+    "DocNum": 1042,
+    "DocType": "dDocument_Items",
+    "DocDate": "2026-03-25",
+    "DocDueDate": "2026-04-25",
+    "CardCode": "C00042",
+    "CardName": "Musterkanzlei GmbH",
+    "DocTotal": 6411.00,
+    "DocTotalFc": 0,
+    "TaxAmount": 1218.09,
+    "DocCurrency": "EUR",
+    "DocumentStatus": "O",
+    "Cancelled": "tNO",
+    "Comments": "Automatisch erstellt aus TANSS Ticket #12345...",
+    "DocumentLines": [
+      {
+        "LineNum": 0,
+        "ItemDescription": "Dell OptiPlex 7020 Desktop PC...",
+        "Quantity": 5,
+        "UnitPrice": 899.00,
+        "LineTotal": 4495.00,
+        "TaxCode": "T1",
+        "TaxPercentagePerRow": 19.0
+      },
+      {
+        "LineNum": 1,
+        "ItemDescription": "Dell P2425H 24\" FHD IPS Monitor...",
+        "Quantity": 5,
+        "UnitPrice": 229.00,
+        "LineTotal": 1145.00,
+        "TaxCode": "T1",
+        "TaxPercentagePerRow": 19.0
+      },
+      {
+        "LineNum": 2,
+        "ItemDescription": "Microsoft 365 Business Standard...",
+        "Quantity": 5,
+        "UnitPrice": 143.40,
+        "LineTotal": 717.00,
+        "TaxCode": "T1",
+        "TaxPercentagePerRow": 19.0
+      },
+      {
+        "LineNum": 3,
+        "ItemDescription": "Einrichtungspauschale...",
+        "Quantity": 1,
+        "UnitPrice": 450.00,
+        "LineTotal": 450.00,
+        "TaxCode": "T1",
+        "TaxPercentagePerRow": 19.0
+      }
+    ]
+  },
+
+  "_tanss_rueckmeldung": {
+    "kommentar_text": "Angebot #1042 wurde in Systemhaus.ONE erstellt.\n\nRAG-Vollstaendigkeitspruefung (55% vollstaendig):\n\nMoeglicherweise vergessen (KRITISCH):\n- Logitech MK270 Tastatur + Maus Set (5x) – In 4 von 5 historischen PC-Angeboten enthalten\n\nEmpfohlen zu pruefen:\n- Dell WD19S Docking Station\n- HDMI-Kabel 2m\n\nEmpfehlung: Peripherie ergaenzen (Tastatur/Maus KRITISCH), Kabelzubehoer fuer Monitor-Anschluss hinzufuegen.\n\nS1-Angebot: https://dein-server:50000/b1s/v2/Quotations(5678)",
+    "endpoint": "POST /backend/api/v1/tickets/12345/comments",
+    "type": "comment",
+    "internal": true
+  }
+}

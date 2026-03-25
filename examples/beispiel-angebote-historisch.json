@@ -1,0 +1,401 @@
+{
+  "_beschreibung": "Historische Angebote als Seed-Daten für den Ingestion-Workflow. Enthält realistische IT-Angebote in normalisiertem Format. POST an /webhook/angebote-ingestion mit diesem Body.",
+  "_verwendung": "curl -X POST http://n8n:5678/webhook/angebote-ingestion -H 'Content-Type: application/json' -d @beispiel-angebote-historisch.json",
+
+  "quelle": "manuell",
+  "angebote": [
+    {
+      "angebot_id": "ANG-2025-0017",
+      "angebot_typ": "PC-Arbeitsplatz",
+      "kunde_branche": "Kanzlei",
+      "positionen": [
+        {
+          "bezeichnung": "Dell OptiPlex 7020 Desktop PC (i5-13500, 16GB RAM, 512GB SSD, Win11 Pro)",
+          "kategorie": "Hardware",
+          "menge": 5,
+          "einheit": "Stück",
+          "preis": 879.00
+        },
+        {
+          "bezeichnung": "Dell P2422H 24\" FHD IPS Monitor",
+          "kategorie": "Peripherie",
+          "menge": 5,
+          "einheit": "Stück",
+          "preis": 209.00
+        },
+        {
+          "bezeichnung": "Logitech MK270 Tastatur + Maus Kombination (kabellos)",
+          "kategorie": "Peripherie",
+          "menge": 5,
+          "einheit": "Stück",
+          "preis": 49.90
+        },
+        {
+          "bezeichnung": "Dell WD19S 180W USB-C Docking Station",
+          "kategorie": "Peripherie",
+          "menge": 5,
+          "einheit": "Stück",
+          "preis": 189.00
+        },
+        {
+          "bezeichnung": "HDMI-Kabel 2m (4K, vergoldete Kontakte)",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 5,
+          "einheit": "Stück",
+          "preis": 12.90
+        },
+        {
+          "bezeichnung": "Cat6A Patchkabel 3m (grau)",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 5,
+          "einheit": "Stück",
+          "preis": 8.50
+        },
+        {
+          "bezeichnung": "Kaltgerätekabel 1,5m (C13)",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 5,
+          "einheit": "Stück",
+          "preis": 6.90
+        },
+        {
+          "bezeichnung": "Microsoft 365 Business Standard – Jahresabonnement",
+          "kategorie": "Lizenzen",
+          "menge": 5,
+          "einheit": "Lizenz/Jahr",
+          "preis": 143.40
+        },
+        {
+          "bezeichnung": "Windows 11 Pro OEM",
+          "kategorie": "Lizenzen",
+          "menge": 5,
+          "einheit": "Lizenz",
+          "preis": 149.00
+        },
+        {
+          "bezeichnung": "Einrichtungspauschale (5 APs: Domain-Join, Software-Setup, Benutzerprofile)",
+          "kategorie": "Service",
+          "menge": 1,
+          "einheit": "Pauschal",
+          "preis": 500.00
+        },
+        {
+          "bezeichnung": "3 Jahre Vor-Ort-Service Next Business Day (Dell ProSupport Plus)",
+          "kategorie": "Service",
+          "menge": 5,
+          "einheit": "Vertrag",
+          "preis": 189.00
+        }
+      ],
+      "gesamtwert_netto": 9867.50,
+      "datum": "2025-06-15",
+      "status": "gewonnen",
+      "ersteller": "Max Mustermann",
+      "quelle": "manuell"
+    },
+
+    {
+      "angebot_id": "ANG-2025-0031",
+      "angebot_typ": "PC-Arbeitsplatz",
+      "kunde_branche": "Steuerberatung",
+      "positionen": [
+        {
+          "bezeichnung": "Lenovo ThinkCentre M70q Gen4 Tiny (i5-13400T, 16GB, 512GB NVMe)",
+          "kategorie": "Hardware",
+          "menge": 3,
+          "einheit": "Stück",
+          "preis": 749.00
+        },
+        {
+          "bezeichnung": "Samsung 27\" FHD Business-Monitor (S27A400UJU)",
+          "kategorie": "Peripherie",
+          "menge": 3,
+          "einheit": "Stück",
+          "preis": 239.00
+        },
+        {
+          "bezeichnung": "Logitech MK540 Tastatur + Maus (kabellos, ergonomisch)",
+          "kategorie": "Peripherie",
+          "menge": 3,
+          "einheit": "Stück",
+          "preis": 59.90
+        },
+        {
+          "bezeichnung": "HDMI-Kabel 1,8m",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 3,
+          "einheit": "Stück",
+          "preis": 11.90
+        },
+        {
+          "bezeichnung": "Cat6 Patchkabel 5m",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 3,
+          "einheit": "Stück",
+          "preis": 9.90
+        },
+        {
+          "bezeichnung": "Microsoft 365 Business Basic – Jahresabonnement",
+          "kategorie": "Lizenzen",
+          "menge": 3,
+          "einheit": "Lizenz/Jahr",
+          "preis": 72.00
+        },
+        {
+          "bezeichnung": "DATEV Arbeitsplatzinstallation (pro PC)",
+          "kategorie": "Service",
+          "menge": 3,
+          "einheit": "Stück",
+          "preis": 120.00
+        },
+        {
+          "bezeichnung": "Einrichtung und Inbetriebnahme (pro Arbeitsplatz)",
+          "kategorie": "Service",
+          "menge": 3,
+          "einheit": "Stück",
+          "preis": 90.00
+        }
+      ],
+      "gesamtwert_netto": 4443.60,
+      "datum": "2025-08-22",
+      "status": "gewonnen",
+      "ersteller": "Anna Schmidt",
+      "quelle": "manuell"
+    },
+
+    {
+      "angebot_id": "ANG-2025-0045",
+      "angebot_typ": "PC-Arbeitsplatz",
+      "kunde_branche": "Arztpraxis",
+      "positionen": [
+        {
+          "bezeichnung": "HP EliteDesk 800 G9 Mini (i5-13500T, 16GB ECC, 256GB SSD)",
+          "kategorie": "Hardware",
+          "menge": 4,
+          "einheit": "Stück",
+          "preis": 899.00
+        },
+        {
+          "bezeichnung": "HP E24 G5 FHD Monitor 24\" (IPS, Höhenverstellbar)",
+          "kategorie": "Peripherie",
+          "menge": 4,
+          "einheit": "Stück",
+          "preis": 259.00
+        },
+        {
+          "bezeichnung": "HP 230 Wireless Maus und Tastatur",
+          "kategorie": "Peripherie",
+          "menge": 4,
+          "einheit": "Stück",
+          "preis": 44.90
+        },
+        {
+          "bezeichnung": "HP USB-C Universal Dock G5",
+          "kategorie": "Peripherie",
+          "menge": 4,
+          "einheit": "Stück",
+          "preis": 199.00
+        },
+        {
+          "bezeichnung": "DisplayPort-Kabel 2m",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 4,
+          "einheit": "Stück",
+          "preis": 14.90
+        },
+        {
+          "bezeichnung": "Cat6A Patchkabel 3m (blau, medizinische Kennzeichnung)",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 4,
+          "einheit": "Stück",
+          "preis": 9.90
+        },
+        {
+          "bezeichnung": "Microsoft 365 Business Standard – Jahresabonnement",
+          "kategorie": "Lizenzen",
+          "menge": 4,
+          "einheit": "Lizenz/Jahr",
+          "preis": 143.40
+        },
+        {
+          "bezeichnung": "Windows 11 Pro OEM (bei OEM-Gerät ggf. inkludiert – separat falls benötigt)",
+          "kategorie": "Lizenzen",
+          "menge": 4,
+          "einheit": "Lizenz",
+          "preis": 149.00
+        },
+        {
+          "bezeichnung": "Praxissoftware-Installation (Dampsoft / Turbomed – pro Arbeitsplatz)",
+          "kategorie": "Service",
+          "menge": 4,
+          "einheit": "Stück",
+          "preis": 150.00
+        },
+        {
+          "bezeichnung": "Netzwerkeinbindung und Grundkonfiguration (4 APs pauschal)",
+          "kategorie": "Service",
+          "menge": 1,
+          "einheit": "Pauschal",
+          "preis": 480.00
+        }
+      ],
+      "gesamtwert_netto": 8379.20,
+      "datum": "2025-10-03",
+      "status": "gewonnen",
+      "ersteller": "Max Mustermann",
+      "quelle": "manuell"
+    },
+
+    {
+      "angebot_id": "ANG-2026-0003",
+      "angebot_typ": "PC-Arbeitsplatz",
+      "kunde_branche": "Immobilien",
+      "positionen": [
+        {
+          "bezeichnung": "Dell OptiPlex 7020 SFF (i7-13700, 32GB RAM, 1TB NVMe SSD, Win11 Pro)",
+          "kategorie": "Hardware",
+          "menge": 8,
+          "einheit": "Stück",
+          "preis": 1149.00
+        },
+        {
+          "bezeichnung": "Dell P2425H 24\" FHD IPS Monitor",
+          "kategorie": "Peripherie",
+          "menge": 8,
+          "einheit": "Stück",
+          "preis": 229.00
+        },
+        {
+          "bezeichnung": "Dell P2425H 24\" FHD IPS Monitor (zweiter Monitor pro AP)",
+          "kategorie": "Peripherie",
+          "menge": 8,
+          "einheit": "Stück",
+          "preis": 229.00
+        },
+        {
+          "bezeichnung": "Logitech MK850 Performance Tastatur + Maus (kabellos, Multi-Device)",
+          "kategorie": "Peripherie",
+          "menge": 8,
+          "einheit": "Stück",
+          "preis": 89.90
+        },
+        {
+          "bezeichnung": "Dell WD22TB4 Thunderbolt 4 Docking Station",
+          "kategorie": "Peripherie",
+          "menge": 8,
+          "einheit": "Stück",
+          "preis": 289.00
+        },
+        {
+          "bezeichnung": "HDMI-Kabel 2m (für Monitor 1)",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 8,
+          "einheit": "Stück",
+          "preis": 12.90
+        },
+        {
+          "bezeichnung": "DisplayPort-Kabel 2m (für Monitor 2)",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 8,
+          "einheit": "Stück",
+          "preis": 14.90
+        },
+        {
+          "bezeichnung": "Cat6A Patchkabel 3m",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 8,
+          "einheit": "Stück",
+          "preis": 8.90
+        },
+        {
+          "bezeichnung": "Microsoft 365 Business Premium – Jahresabonnement (inkl. Intune, Defender)",
+          "kategorie": "Lizenzen",
+          "menge": 8,
+          "einheit": "Lizenz/Jahr",
+          "preis": 216.00
+        },
+        {
+          "bezeichnung": "Einrichtung, Domain-Join, Microsoft Intune Enrollment (8 APs pauschal)",
+          "kategorie": "Service",
+          "menge": 1,
+          "einheit": "Pauschal",
+          "preis": 960.00
+        },
+        {
+          "bezeichnung": "5 Jahre Dell ProSupport Plus Vor-Ort-Service NBD",
+          "kategorie": "Service",
+          "menge": 8,
+          "einheit": "Vertrag",
+          "preis": 299.00
+        }
+      ],
+      "gesamtwert_netto": 25638.80,
+      "datum": "2026-01-15",
+      "status": "offen",
+      "ersteller": "Anna Schmidt",
+      "quelle": "manuell"
+    },
+
+    {
+      "angebot_id": "ANG-2025-0028",
+      "angebot_typ": "PC-Arbeitsplatz",
+      "kunde_branche": "Handwerksbetrieb",
+      "positionen": [
+        {
+          "bezeichnung": "Lenovo ThinkCentre M90q Gen4 (i5-13500T, 16GB, 512GB SSD, Win11 Pro)",
+          "kategorie": "Hardware",
+          "menge": 2,
+          "einheit": "Stück",
+          "preis": 819.00
+        },
+        {
+          "bezeichnung": "AOC 24B2XH 24\" FHD IPS Monitor",
+          "kategorie": "Peripherie",
+          "menge": 2,
+          "einheit": "Stück",
+          "preis": 169.00
+        },
+        {
+          "bezeichnung": "Logitech MK270 Tastatur + Maus Set (kabellos)",
+          "kategorie": "Peripherie",
+          "menge": 2,
+          "einheit": "Stück",
+          "preis": 49.90
+        },
+        {
+          "bezeichnung": "HDMI-Kabel 2m",
+          "kategorie": "Kabel & Zubehör",
+          "menge": 2,
+          "einheit": "Stück",
+          "preis": 12.90
+        },
+        {
+          "bezeichnung": "Microsoft 365 Business Standard – Jahresabonnement",
+          "kategorie": "Lizenzen",
+          "menge": 2,
+          "einheit": "Lizenz/Jahr",
+          "preis": 143.40
+        },
+        {
+          "bezeichnung": "Lexware Handwerk Premium – Einzelplatzlizenz",
+          "kategorie": "Lizenzen",
+          "menge": 2,
+          "einheit": "Lizenz",
+          "preis": 349.00
+        },
+        {
+          "bezeichnung": "Installation und Einrichtung (2 APs pauschal inkl. Drucker-Einbindung)",
+          "kategorie": "Service",
+          "menge": 1,
+          "einheit": "Pauschal",
+          "preis": 240.00
+        }
+      ],
+      "gesamtwert_netto": 3747.40,
+      "datum": "2025-07-08",
+      "status": "verloren",
+      "ersteller": "Max Mustermann",
+      "quelle": "manuell"
+    }
+  ]
+}
