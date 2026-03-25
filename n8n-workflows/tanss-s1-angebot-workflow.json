@@ -1,0 +1,546 @@
+{
+  "name": "TANSS → S1 Angebotserstellung mit RAG",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (alle 3 Min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TANSS_BASE_URL }}/backend/api/v1/login",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "username", "value": "={{ $env.TANSS_USERNAME }}" },
+            { "name": "password", "value": "={{ $env.TANSS_PASSWORD }}" }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "tanss-login",
+      "name": "TANSS Login",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.apiKey }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "isNotEmpty" }
+            }
+          ]
+        }
+      },
+      "id": "check-tanss-auth",
+      "name": "TANSS Auth OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TANSS_BASE_URL }}/backend/api/v1/tickets/own",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apiToken", "value": "={{ $('TANSS Login').item.json.apiKey }}" }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "tanss-get-tickets",
+      "name": "TANSS: Eigene Tickets holen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 220],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "tickets",
+        "options": {}
+      },
+      "id": "split-tickets",
+      "name": "Tickets aufteilen",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [880, 220]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TANSS_BASE_URL }}/backend/api/v1/tickets/{{ $json.id }}/history",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apiToken", "value": "={{ $('TANSS Login').item.json.apiKey }}" }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "tanss-get-history",
+      "name": "TANSS: Ticket-History holen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 220],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Neue Angebot-Kommentare filtern\n// ============================================================\n// Static Data: Letzten Check-Timestamp speichern\nconst staticData = $getWorkflowStaticData('global');\nconst letzterCheck = staticData.letzterCheck\n  ? new Date(staticData.letzterCheck)\n  : new Date(Date.now() - 10 * 60 * 1000); // Fallback: letzte 10 Min\n\n// Aktuellen Timestamp für nächsten Lauf speichern\nstaticData.letzterCheck = new Date().toISOString();\n\n// Trigger-Hashtags\nconst TRIGGER_TAGS = ['#angebot', '#quote'];\n\nconst ergebnisse = [];\n\nfor (const item of $input.all()) {\n  const ticketId   = item.json.ticketId || item.json.id;\n  const kundeId    = item.json.customerId || item.json.kunde_id || '';\n  const kommentare = item.json.comments || item.json.history || [];\n\n  for (const kommentar of kommentare) {\n    // Zeitstempel-Prüfung\n    const kommentarDatum = new Date(\n      kommentar.createdAt || kommentar.created_at || kommentar.timestamp || 0\n    );\n    if (kommentarDatum <= letzterCheck) continue;\n\n    // Trigger-Hashtag suchen (case-insensitive)\n    const text = (kommentar.content || kommentar.text || '').toLowerCase();\n    const gefundenerTag = TRIGGER_TAGS.find(tag => text.includes(tag));\n    if (!gefundenerTag) continue;\n\n    // Kommentartext nach dem Hashtag extrahieren\n    const originalText = kommentar.content || kommentar.text || '';\n    const tagIndex = originalText.toLowerCase().indexOf(gefundenerTag);\n    const kommentarText = originalText.substring(tagIndex + gefundenerTag.length).trim();\n\n    if (!kommentarText) continue;\n\n    ergebnisse.push({\n      json: {\n        ticketId,\n        kundeId,\n        kommentarText,\n        kommentarId:    kommentar.id,\n        kommentarDatum: kommentarDatum.toISOString(),\n        techniker:      kommentar.author || kommentar.techniker || 'Unbekannt',\n        triggerTag:     gefundenerTag\n      }\n    });\n  }\n}\n\nreturn ergebnisse.length > 0 ? ergebnisse : [{ json: { _keine_angebote: true } }];\n"
+      },
+      "id": "filter-kommentare",
+      "name": "Neue Angebot-Kommentare filtern",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json._keine_angebote }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ]
+        }
+      },
+      "id": "hat-angebot-kommentar",
+      "name": "Hat Angebot-Kommentar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1540, 220]
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Du bist ein Assistent in einem IT-Systemhaus. Du erhältst einen Freitext-Kommentar eines Technikers aus einem TANSS-Ticket. Deine Aufgabe ist es, daraus strukturierte Angebotspositionen zu extrahieren.\n\nRegeln:\n1. Extrahiere ALLE erwähnten Produkte, Dienstleistungen und Lizenzen als einzelne Positionen\n2. Schätze realistische Preise basierend auf deinem Wissen über IT-Hardwarepreise (Stand 2025/2026)\n3. Erkenne implizite Positionen: Wenn \"5 PCs\" erwähnt werden, denke an zugehörige Positionen (aber liste sie NICHT automatisch hinzu – das macht die RAG-Prüfung)\n4. Klassifiziere den Angebots-Typ: PC-Arbeitsplatz, Server, Netzwerk, Drucker, Telefonie, Software, Mischung\n5. Vergib einen confidence_score (0.0-1.0) basierend auf der Klarheit des Kommentars\n\nKategorien für Positionen:\n- Hardware (PCs, Server, Laptops, Switches, etc.)\n- Peripherie (Monitore, Maus, Tastatur, Headsets, Docking Stations)\n- Kabel & Zubehör (HDMI, Netzwerkkabel, Adapter, etc.)\n- Lizenzen (Microsoft 365, Windows, Antivirus, etc.)\n- Service (Einrichtung, Installation, Vor-Ort-Service, Migration)\n- Netzwerk (Switches, Access Points, Firewall, Patchpanel)\n\nAusgabe: Valides JSON nach dem vorgegebenen Schema. Keine Erklärungen, kein Markdown.\n\nSchema:\n{\n  \"angebot_typ\": \"PC-Arbeitsplatz\",\n  \"positionen\": [\n    {\n      \"bezeichnung\": \"string\",\n      \"kategorie\": \"string\",\n      \"menge\": 1,\n      \"einheit\": \"Stück\",\n      \"geschaetzter_preis\": 0.00\n    }\n  ],\n  \"zusammenfassung\": \"string\",\n  \"confidence_score\": 0.85\n}"
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.kommentarText }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "openai-parse-kommentar",
+      "name": "OpenAI: Kommentar → Positionen",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [1760, 140],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ME_OPENAI",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.confidence_score }}",
+              "rightValue": 0.6,
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ]
+        }
+      },
+      "id": "confidence-check",
+      "name": "Confidence ausreichend?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1980, 140]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Geparste Positionen als natürlichsprachlichen Text serialisieren\n// für das Embedding\nconst angebot = $input.first().json;\nconst kontextDaten = $('Neue Angebot-Kommentare filtern').item.json;\n\nconst gruppen = {};\nfor (const pos of (angebot.positionen || [])) {\n  const kat = pos.kategorie || 'Sonstige';\n  if (!gruppen[kat]) gruppen[kat] = [];\n  gruppen[kat].push(`${pos.menge}x ${pos.bezeichnung} (${pos.geschaetzter_preis}€)`);\n}\n\nlet text = `${angebot.angebot_typ} Angebot, ${(angebot.positionen || []).length} Positionen:\\n`;\nfor (const [kat, positionen] of Object.entries(gruppen)) {\n  text += `${kat}: ${positionen.join(', ')}\\n`;\n}\ntext += `Zusammenfassung: ${angebot.zusammenfassung}`;\n\nreturn [{\n  json: {\n    ...angebot,\n    serialisierterText: text,\n    ticketId:   kontextDaten.ticketId,\n    kundeId:    kontextDaten.kundeId,\n    techniker:  kontextDaten.techniker,\n    kommentarId: kontextDaten.kommentarId\n  }\n}];\n"
+      },
+      "id": "serialisiere-angebot",
+      "name": "Angebot für Embedding serialisieren",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 60]
+    },
+    {
+      "parameters": {
+        "resource": "embedding",
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "text-embedding-3-small"
+        },
+        "input": "={{ $json.serialisierterText }}",
+        "options": {}
+      },
+      "id": "openai-embedding",
+      "name": "OpenAI: Embedding erzeugen",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [2420, 60],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ME_OPENAI",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/match_angebote",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query_embedding\": {{ JSON.stringify($('OpenAI: Embedding erzeugen').item.json.data[0].embedding) }},\n  \"match_threshold\": 0.65,\n  \"match_count\": 5,\n  \"filter_typ\": \"{{ $('Angebot für Embedding serialisieren').item.json.angebot_typ }}\"\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "supabase-rag-search",
+      "name": "Supabase: RAG Similarity Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 60],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Du bist ein erfahrener Vertriebsmitarbeiter in einem IT-Systemhaus. Du erhältst:\n\n1. NEUES ANGEBOT: Eine Liste von Positionen die gerade für einen Kunden zusammengestellt wurde\n2. ÄHNLICHE HISTORISCHE ANGEBOTE: 3-5 Angebote aus der Vergangenheit, die per Vektorsuche als ähnlich identifiziert wurden\n\nDeine Aufgabe: Vergleiche das neue Angebot mit den historischen Angeboten und identifiziere Positionen, die in den historischen Angeboten häufig vorkommen, aber im neuen Angebot FEHLEN.\n\nBewertung fehlender Positionen:\n- KRITISCH: Position kommt in 80%+ der historischen Angebote vor\n- EMPFOHLEN: Position kommt in 40-79% der historischen Angebote vor\n- OPTIONAL: Position kommt in weniger als 40% vor, aber könnte sinnvoll sein\n\nRegeln:\n- Basiere deine Analyse NUR auf den bereitgestellten historischen Angeboten\n- Erfinde keine Positionen, die in keinem historischen Angebot vorkommen\n- Berücksichtige die Mengen\n- Ignoriere Preisunterschiede\n- Berechne einen vollstaendigkeit_score (0.0-1.0): 1.0 = nichts fehlt\n\nAusgabe: Valides JSON. Keine Erklärungen.\n\nSchema:\n{\n  \"fehlende_positionen\": [\n    {\n      \"bezeichnung\": \"string\",\n      \"kategorie\": \"string\",\n      \"typische_menge\": 1,\n      \"prioritaet\": \"KRITISCH\",\n      \"begruendung\": \"string\"\n    }\n  ],\n  \"vollstaendigkeit_score\": 0.7,\n  \"empfehlung\": \"string\"\n}"
+            },
+            {
+              "role": "user",
+              "content": "=NEUES ANGEBOT:\n{{ JSON.stringify($('Angebot für Embedding serialisieren').item.json.positionen, null, 2) }}\n\nÄHNLICHE HISTORISCHE ANGEBOTE:\n{{ JSON.stringify($json, null, 2) }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "id": "openai-rag-pruefung",
+      "name": "OpenAI: RAG Vollständigkeitsprüfung",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [2860, 60],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ME_OPENAI",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.S1_BASE_URL }}/b1s/v2/Login",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"UserName\":  \"{{ $env.S1_USERNAME }}\",\n  \"Password\":  \"{{ $env.S1_PASSWORD }}\",\n  \"CompanyDB\": \"{{ $env.S1_COMPANY_DB }}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "s1-login",
+      "name": "S1: Login",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3080, 60],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// SAP B1 Quotation Payload aus geparsten Positionen bauen\n// ============================================================\nconst angebot      = $('Angebot für Embedding serialisieren').item.json;\nconst ragErgebnis  = $('OpenAI: RAG Vollständigkeitsprüfung').item.json;\nconst s1Login      = $('S1: Login').item.json;\n\n// Datum: heute im Format YYYY-MM-DD\nconst heute = new Date().toISOString().split('T')[0];\n\n// Positionen aus geparsten Angebot in SAP-B1-Format überführen\nconst documentLines = (angebot.positionen || []).map((pos, index) => ({\n  LineNum:          index,\n  ItemDescription:  pos.bezeichnung,\n  Quantity:         pos.menge,\n  UnitPrice:        pos.geschaetzter_preis || 0,\n  TaxCode:          process.env.S1_DEFAULT_TAX_CODE || 'T1',\n  // ItemCode wird nur gesetzt wenn eine Artikelnummer vorhanden ist\n  ...(pos.artikelNr ? { ItemCode: pos.artikelNr } : {})\n}));\n\n// Hinweis auf fehlende Positionen als Bemerkung anhängen\nlet comments = `Automatisch erstellt aus TANSS Ticket #${angebot.ticketId}\\n`;\ncomments += `Erstellt von: ${angebot.techniker}\\n`;\n\nif (ragErgebnis.fehlende_positionen && ragErgebnis.fehlende_positionen.length > 0) {\n  comments += `\\nRAG-Hinweis (Vollständigkeit: ${Math.round((ragErgebnis.vollstaendigkeit_score || 0) * 100)}%):\\n`;\n  const kritische = ragErgebnis.fehlende_positionen.filter(p => p.prioritaet === 'KRITISCH');\n  if (kritische.length > 0) {\n    comments += `Ggf. fehlend: ${kritische.map(p => p.bezeichnung).join(', ')}`;\n  }\n}\n\nconst s1Payload = {\n  CardCode:      angebot.kundeId || '',\n  DocDate:       heute,\n  DocDueDate:    heute,\n  Comments:      comments,\n  DocumentLines: documentLines,\n  UserDefinedFields: {\n    U_TANSS_TicketID: String(angebot.ticketId || '')\n  }\n};\n\nreturn [{\n  json: {\n    s1Payload,\n    s1Cookies: s1Login.cookies || '',\n    angebot,\n    ragErgebnis\n  }\n}];\n"
+      },
+      "id": "build-s1-payload",
+      "name": "S1 Quotation Payload bauen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3300, 60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.S1_BASE_URL }}/b1s/v2/Quotations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Cookie",       "value": "={{ $json.s1Cookies }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.s1Payload) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "s1-create-quotation",
+      "name": "S1: Angebot erstellen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3520, 60],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// TANSS-Rückmeldungs-Kommentar formatieren\n// ============================================================\nconst s1Response  = $input.first().json;\nconst prevData    = $('S1 Quotation Payload bauen').item.json;\nconst ragErgebnis = prevData.ragErgebnis;\nconst angebot     = prevData.angebot;\n\n// S1-Angebotsnummer und Link\nconst s1DocNum   = s1Response.DocNum   || s1Response.docNum   || 'unbekannt';\nconst s1DocEntry = s1Response.DocEntry || s1Response.docEntry || '';\nconst vollScore  = Math.round((ragErgebnis.vollstaendigkeit_score || 0) * 100);\n\n// Fehlende Positionen nach Priorität gruppieren\nconst fehlende   = ragErgebnis.fehlende_positionen || [];\nconst kritische  = fehlende.filter(p => p.prioritaet === 'KRITISCH');\nconst empfohlen  = fehlende.filter(p => p.prioritaet === 'EMPFOHLEN');\n\nlet kommentar = `Angebot #${s1DocNum} wurde in Systemhaus.ONE erstellt.\\n\\n`;\nkommentar += `RAG-Vollstaendigkeitspruefung (${vollScore}% vollstaendig):\\n`;\n\nif (fehlende.length === 0) {\n  kommentar += `Alle typischen Positionen sind vorhanden.\\n`;\n} else {\n  if (kritische.length > 0) {\n    kommentar += `\\nMoeglicherweise vergessen (KRITISCH):\\n`;\n    kritische.forEach(p => {\n      kommentar += `- ${p.bezeichnung} (${p.typische_menge}x) – ${p.begruendung}\\n`;\n    });\n  }\n  if (empfohlen.length > 0) {\n    kommentar += `\\nEmpfohlen zu pruefen:\\n`;\n    empfohlen.forEach(p => {\n      kommentar += `- ${p.bezeichnung}\\n`;\n    });\n  }\n  if (ragErgebnis.empfehlung) {\n    kommentar += `\\nEmpfehlung: ${ragErgebnis.empfehlung}\\n`;\n  }\n}\n\nkommentar += `\\nS1-Angebot: ${process.env.S1_BASE_URL || ''}/b1s/v2/Quotations(${s1DocEntry})`;\n\nreturn [{\n  json: {\n    ticketId:  angebot.ticketId,\n    kommentar,\n    s1DocNum,\n    s1DocEntry\n  }\n}];\n"
+      },
+      "id": "format-tanss-kommentar",
+      "name": "TANSS-Rückmeldung formatieren",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3740, 60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TANSS_BASE_URL }}/backend/api/v1/tickets/{{ $json.ticketId }}/comments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apiToken",     "value": "={{ $('TANSS Login').item.json.apiKey }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "content", "value": "={{ $json.kommentar }}" },
+            { "name": "type",    "value": "comment" }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "tanss-post-kommentar",
+      "name": "TANSS: Rückmeldung posten",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3960, 60],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.S1_BASE_URL }}/b1s/v2/Logout",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Cookie", "value": "={{ $('S1: Login').item.json.cookies }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "s1-logout",
+      "name": "S1: Logout",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4180, 60],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $env.SLACK_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "isNotEmpty" }
+            }
+          ]
+        }
+      },
+      "id": "check-slack-config",
+      "name": "Slack konfiguriert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2200, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"*TANSS → S1 Workflow Fehler*\\n```{{ $json.message || JSON.stringify($json) }}```\"\n}",
+        "options": {}
+      },
+      "id": "slack-error-notify",
+      "name": "Slack: Fehler melden",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2420, 260],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [1980, 320]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (alle 3 Min)": {
+      "main": [[{ "node": "TANSS Login", "type": "main", "index": 0 }]]
+    },
+    "TANSS Login": {
+      "main": [[{ "node": "TANSS Auth OK?", "type": "main", "index": 0 }]]
+    },
+    "TANSS Auth OK?": {
+      "main": [
+        [{ "node": "TANSS: Eigene Tickets holen", "type": "main", "index": 0 }],
+        [{ "node": "Slack: Fehler melden", "type": "main", "index": 0 }]
+      ]
+    },
+    "TANSS: Eigene Tickets holen": {
+      "main": [[{ "node": "Tickets aufteilen", "type": "main", "index": 0 }]]
+    },
+    "Tickets aufteilen": {
+      "main": [[{ "node": "TANSS: Ticket-History holen", "type": "main", "index": 0 }]]
+    },
+    "TANSS: Ticket-History holen": {
+      "main": [[{ "node": "Neue Angebot-Kommentare filtern", "type": "main", "index": 0 }]]
+    },
+    "Neue Angebot-Kommentare filtern": {
+      "main": [[{ "node": "Hat Angebot-Kommentar?", "type": "main", "index": 0 }]]
+    },
+    "Hat Angebot-Kommentar?": {
+      "main": [
+        [{ "node": "OpenAI: Kommentar → Positionen", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "OpenAI: Kommentar → Positionen": {
+      "main": [[{ "node": "Confidence ausreichend?", "type": "main", "index": 0 }]]
+    },
+    "Confidence ausreichend?": {
+      "main": [
+        [{ "node": "Angebot für Embedding serialisieren", "type": "main", "index": 0 }],
+        [{ "node": "Slack: Fehler melden", "type": "main", "index": 0 }]
+      ]
+    },
+    "Angebot für Embedding serialisieren": {
+      "main": [[{ "node": "OpenAI: Embedding erzeugen", "type": "main", "index": 0 }]]
+    },
+    "OpenAI: Embedding erzeugen": {
+      "main": [[{ "node": "Supabase: RAG Similarity Search", "type": "main", "index": 0 }]]
+    },
+    "Supabase: RAG Similarity Search": {
+      "main": [[{ "node": "OpenAI: RAG Vollständigkeitsprüfung", "type": "main", "index": 0 }]]
+    },
+    "OpenAI: RAG Vollständigkeitsprüfung": {
+      "main": [[{ "node": "S1: Login", "type": "main", "index": 0 }]]
+    },
+    "S1: Login": {
+      "main": [[{ "node": "S1 Quotation Payload bauen", "type": "main", "index": 0 }]]
+    },
+    "S1 Quotation Payload bauen": {
+      "main": [[{ "node": "S1: Angebot erstellen", "type": "main", "index": 0 }]]
+    },
+    "S1: Angebot erstellen": {
+      "main": [[{ "node": "TANSS-Rückmeldung formatieren", "type": "main", "index": 0 }]]
+    },
+    "TANSS-Rückmeldung formatieren": {
+      "main": [[{ "node": "TANSS: Rückmeldung posten", "type": "main", "index": 0 }]]
+    },
+    "TANSS: Rückmeldung posten": {
+      "main": [[{ "node": "S1: Logout", "type": "main", "index": 0 }]]
+    },
+    "Error Trigger": {
+      "main": [[{ "node": "Slack konfiguriert?", "type": "main", "index": 0 }]]
+    },
+    "Slack konfiguriert?": {
+      "main": [
+        [{ "node": "Slack: Fehler melden", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "tanss-s1-angebot-workflow",
+    "timezone": "Europe/Berlin",
+    "executionTimeout": 120
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "REPLACE_ME_INSTANCE_ID"
+  },
+  "tags": [
+    { "name": "TANSS" },
+    { "name": "Systemhaus.ONE" },
+    { "name": "RAG" },
+    { "name": "Angebote" }
+  ],
+  "pinData": {}
+}

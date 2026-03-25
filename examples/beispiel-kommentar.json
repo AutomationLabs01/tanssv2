@@ -1,0 +1,90 @@
+{
+  "_beschreibung": "Beispiel-Payload eines TANSS-Ticket-Kommentars der den #angebot-Trigger enthält.",
+  "_verwendung": "Dieser Kommentar wird vom 'Neue Angebot-Kommentare filtern' Code-Node verarbeitet.",
+
+  "ticket_id": 12345,
+  "ticket_titel": "Neuer Mitarbeiter - Arbeitsplatz einrichten",
+  "ticket_status": "open",
+  "kunde_id": "C00042",
+  "kunde_name": "Musterkanzlei GmbH",
+  "kommentar": {
+    "id": 9876,
+    "content": "#angebot Kunde braucht 5 neue Arbeitsplatz-PCs für die neuen Mitarbeiter. Dell OptiPlex oder Lenovo ThinkCentre, jeweils mit 24 Zoll Monitor. Microsoft 365 Business Standard Lizenzen sind auch nötig. Bitte auch Einrichtung mit einplanen.",
+    "author": "Max Mustermann",
+    "authorId": 42,
+    "createdAt": "2026-03-25T10:30:00Z",
+    "type": "comment",
+    "internal": false
+  },
+
+  "_erwartetes_llm_ergebnis": {
+    "angebot_typ": "PC-Arbeitsplatz",
+    "positionen": [
+      {
+        "bezeichnung": "Dell OptiPlex 7020 Desktop PC (Intel Core i5-13500, 16GB RAM, 512GB NVMe SSD, Win11 Pro)",
+        "kategorie": "Hardware",
+        "menge": 5,
+        "einheit": "Stück",
+        "geschaetzter_preis": 899.00
+      },
+      {
+        "bezeichnung": "Dell P2425H 24\" FHD IPS Monitor",
+        "kategorie": "Peripherie",
+        "menge": 5,
+        "einheit": "Stück",
+        "geschaetzter_preis": 229.00
+      },
+      {
+        "bezeichnung": "Microsoft 365 Business Standard (Jahresabonnement)",
+        "kategorie": "Lizenzen",
+        "menge": 5,
+        "einheit": "Lizenz/Jahr",
+        "geschaetzter_preis": 143.40
+      },
+      {
+        "bezeichnung": "Einrichtungspauschale (5 Arbeitsplätze inkl. Domain-Join, Software-Setup)",
+        "kategorie": "Service",
+        "menge": 1,
+        "einheit": "Pauschal",
+        "geschaetzter_preis": 450.00
+      }
+    ],
+    "zusammenfassung": "5 Dell-Arbeitsplatz-PCs mit je einem 24\" Monitor und Microsoft 365 Business Standard Jahreslizenzen für neue Mitarbeiter einer Kanzlei. Einrichtung vor Ort als Pauschale inkludiert. Alternative: Lenovo ThinkCentre M70q Gen4 möglich.",
+    "confidence_score": 0.82
+  },
+
+  "_erwartetes_rag_ergebnis": {
+    "fehlende_positionen": [
+      {
+        "bezeichnung": "Logitech MK270 Tastatur + Maus Kombi (kabellos)",
+        "kategorie": "Peripherie",
+        "typische_menge": 5,
+        "prioritaet": "KRITISCH",
+        "begruendung": "In 4 von 5 historischen PC-Angeboten enthalten (Ø Similarity 0.87)"
+      },
+      {
+        "bezeichnung": "Dell WD19S 180W USB-C Docking Station",
+        "kategorie": "Peripherie",
+        "typische_menge": 5,
+        "prioritaet": "EMPFOHLEN",
+        "begruendung": "In 3 von 5 historischen Kanzlei-Angeboten als Docking Station enthalten"
+      },
+      {
+        "bezeichnung": "HDMI-Kabel 2m (Monitor-Anschluss)",
+        "kategorie": "Kabel & Zubehör",
+        "typische_menge": 5,
+        "prioritaet": "EMPFOHLEN",
+        "begruendung": "Standardzubehör in allen historischen Angeboten mit Monitor"
+      },
+      {
+        "bezeichnung": "Windows 11 Pro OEM Lizenz",
+        "kategorie": "Lizenzen",
+        "typische_menge": 5,
+        "prioritaet": "OPTIONAL",
+        "begruendung": "Separate Windows-Lizenz in 2 Angeboten – bei OEM-Gerät ggf. inkludiert"
+      }
+    ],
+    "vollstaendigkeit_score": 0.55,
+    "empfehlung": "Peripherie ergänzen (Tastatur/Maus KRITISCH), Kabelzubehör für Monitor-Anschluss hinzufügen. Docking Station prüfen falls Homeoffice-Nutzung."
+  }
+}

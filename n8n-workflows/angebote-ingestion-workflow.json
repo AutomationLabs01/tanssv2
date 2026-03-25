@@ -1,0 +1,340 @@
+{
+  "name": "Angebote Ingestion – Historische Angebote in Vector-DB",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Manueller Start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "angebote-ingestion",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body?.quelle || $json.quelle || 'manuell' }}",
+              "rightValue": "s1-api",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "check-datenquelle",
+      "name": "Datenquelle: S1 API?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [280, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.S1_BASE_URL }}/b1s/v2/Login",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"UserName\":  \"{{ $env.S1_USERNAME }}\",\n  \"Password\":  \"{{ $env.S1_PASSWORD }}\",\n  \"CompanyDB\": \"{{ $env.S1_COMPANY_DB }}\"\n}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "s1-login-ingestion",
+      "name": "S1: Login für Ingestion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.S1_BASE_URL }}/b1s/v2/Quotations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Cookie",       "value": "={{ $json.cookies }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "$filter",  "value": "DocDate ge '2024-01-01'" },
+            { "name": "$expand",  "value": "DocumentLines" },
+            { "name": "$orderby", "value": "DocDate desc" },
+            { "name": "$top",     "value": "100" }
+          ]
+        },
+        "options": { "timeout": 60000 }
+      },
+      "id": "s1-get-quotations",
+      "name": "S1: Angebote abrufen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// S1-Angebote in einheitliches Format überführen\nconst angebote = $input.first().json.value || [];\n\nreturn angebote.map(ang => ({\n  json: {\n    angebot_id:       `ANG-S1-${ang.DocNum}`,\n    angebot_typ:      erkenneTyp(ang),\n    kunde_branche:    '',  // Wird aus BP-Stammdaten ergänzt wenn vorhanden\n    positionen:       (ang.DocumentLines || []).map(l => ({\n      bezeichnung:    l.ItemDescription || l.ItemCode || 'Unbekannt',\n      kategorie:      erkennePosKategorie(l),\n      menge:          l.Quantity || 1,\n      einheit:        l.UoMCode || 'Stück',\n      preis:          l.UnitPrice || 0\n    })),\n    gesamtwert_netto: ang.DocTotal || 0,\n    datum:            ang.DocDate,\n    status:           ang.DocumentStatus === 'O' ? 'offen' :\n                      ang.DocumentStatus === 'C' ? 'gewonnen' : 'verloren',\n    ersteller:        ang.SalesPersonCode || '',\n    quelle:           'systemhaus-one',\n    roh_daten:        ang\n  }\n}));\n\nfunction erkenneTyp(ang) {\n  const lines = (ang.DocumentLines || []).map(l =>\n    (l.ItemDescription || '').toLowerCase()\n  );\n  if (lines.some(l => l.includes('server')))  return 'Server';\n  if (lines.some(l => l.includes('switch') || l.includes('firewall') || l.includes('access point'))) return 'Netzwerk';\n  if (lines.some(l => l.includes('drucker') || l.includes('printer'))) return 'Drucker';\n  if (lines.some(l => l.includes('telefon') || l.includes('phone') || l.includes('headset'))) return 'Telefonie';\n  if (lines.some(l => l.includes('pc') || l.includes('desktop') || l.includes('laptop') || l.includes('optiplex') || l.includes('thinkcentre'))) return 'PC-Arbeitsplatz';\n  return 'Mischung';\n}\n\nfunction erkennePosKategorie(line) {\n  const desc = (line.ItemDescription || line.ItemCode || '').toLowerCase();\n  if (desc.includes('lizenz') || desc.includes('license') || desc.includes('365') || desc.includes('windows')) return 'Lizenzen';\n  if (desc.includes('monitor') || desc.includes('maus') || desc.includes('tastatur') || desc.includes('keyboard') || desc.includes('docking')) return 'Peripherie';\n  if (desc.includes('kabel') || desc.includes('cable') || desc.includes('adapter')) return 'Kabel & Zubehör';\n  if (desc.includes('switch') || desc.includes('firewall') || desc.includes('access point') || desc.includes('router')) return 'Netzwerk';\n  if (desc.includes('einrichtung') || desc.includes('service') || desc.includes('installation') || desc.includes('vor-ort')) return 'Service';\n  return 'Hardware';\n}\n"
+      },
+      "id": "normalize-s1-angebote",
+      "name": "S1-Angebote normalisieren",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// JSON/CSV-Eingabe aus Webhook-Body oder Manual-Trigger normalisieren\nconst input = $input.first().json;\n\n// Unterstützte Formate:\n// 1. Array von Angeboten direkt im Body\n// 2. { angebote: [...] } Wrapper-Objekt\n// 3. Einzelnes Angebot-Objekt\n\nlet angebote = [];\n\nif (Array.isArray(input.body?.angebote)) {\n  angebote = input.body.angebote;\n} else if (Array.isArray(input.body)) {\n  angebote = input.body;\n} else if (Array.isArray(input.angebote)) {\n  angebote = input.angebote;\n} else if (Array.isArray(input)) {\n  angebote = input;\n} else if (input.angebot_id || input.DocNum) {\n  // Einzelnes Angebot\n  angebote = [input];\n} else {\n  throw new Error('Kein gültiges Angebots-Format erkannt. Erwartet: Array oder Objekt mit angebote-Property.');\n}\n\nreturn angebote.map(a => ({ json: a }));\n"
+      },
+      "id": "parse-manual-input",
+      "name": "Manuelle Eingabe parsen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 400]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "id": "merge-quellen",
+      "name": "Quellen zusammenführen",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Angebot als natürlichsprachlichen Text serialisieren\n// (optimiert für text-embedding-3-small)\nconst a = $input.first().json;\n\n// Positionen nach Kategorie gruppieren\nconst gruppen = {};\nfor (const pos of (a.positionen || [])) {\n  const kat = pos.kategorie || 'Sonstige';\n  if (!gruppen[kat]) gruppen[kat] = [];\n  gruppen[kat].push(\n    `${pos.menge}x ${pos.bezeichnung}` +\n    (pos.preis ? ` (${pos.preis}€)` : '')\n  );\n}\n\n// Kategorien-Reihenfolge für konsistentes Embedding\nconst katReihenfolge = ['Hardware', 'Peripherie', 'Kabel & Zubehör', 'Lizenzen', 'Service', 'Netzwerk', 'Sonstige'];\n\nlet text = `${a.angebot_typ || 'IT'} Angebot`;\nif (a.kunde_branche) text += ` für ${a.kunde_branche}`;\ntext += `, ${(a.positionen || []).length} Positionen:\\n`;\n\nfor (const kat of katReihenfolge) {\n  if (gruppen[kat] && gruppen[kat].length > 0) {\n    text += `${kat}: ${gruppen[kat].join(', ')}\\n`;\n  }\n}\n\n// Weitere Kategorien die nicht in der fixen Reihenfolge sind\nfor (const [kat, positionen] of Object.entries(gruppen)) {\n  if (!katReihenfolge.includes(kat)) {\n    text += `${kat}: ${positionen.join(', ')}\\n`;\n  }\n}\n\nif (a.gesamtwert_netto) text += `Gesamtwert: ${a.gesamtwert_netto}€ netto, `;\nif (a.status)           text += `Status: ${a.status}`;\n\nreturn [{\n  json: {\n    ...a,\n    serialisierterText: text.trim()\n  }\n}];\n"
+      },
+      "id": "serialisiere-fuer-embedding",
+      "name": "Angebot serialisieren",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1380, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/angebot_exists",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"p_angebot_id\": \"{{ $json.angebot_id }}\" }",
+        "options": { "timeout": 10000 }
+      },
+      "id": "check-duplikat",
+      "name": "Duplikat prüfen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1600, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ]
+        }
+      },
+      "id": "ist-duplikat",
+      "name": "Ist Duplikat?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1820, 300]
+    },
+    {
+      "parameters": {
+        "resource": "embedding",
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "text-embedding-3-small"
+        },
+        "input": "={{ $('Angebot serialisieren').item.json.serialisierterText }}",
+        "options": {}
+      },
+      "id": "openai-embedding-ingestion",
+      "name": "OpenAI: Embedding erstellen",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [2040, 220],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_ME_OPENAI",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Supabase INSERT Payload bauen\nconst angebot   = $('Angebot serialisieren').item.json;\nconst embedding = $input.first().json.data[0].embedding;\n\nconst metadata = {\n  angebot_id:        angebot.angebot_id,\n  angebot_typ:       angebot.angebot_typ,\n  kunde_branche:     angebot.kunde_branche || null,\n  kategorien:        [...new Set((angebot.positionen || []).map(p => p.kategorie))],\n  positionen_anzahl: (angebot.positionen || []).length,\n  gesamtwert_netto:  angebot.gesamtwert_netto || null,\n  datum:             angebot.datum || null,\n  status:            angebot.status || null,\n  ersteller:         angebot.ersteller || null,\n  quelle:            angebot.quelle || 'manuell'\n};\n\nreturn [{\n  json: {\n    content:   angebot.serialisierterText,\n    embedding: embedding,\n    metadata:  metadata\n  }\n}];\n"
+      },
+      "id": "build-supabase-payload",
+      "name": "Supabase Payload bauen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2260, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/angebote_vectors",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" },
+            { "name": "Prefer",        "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "supabase-insert",
+      "name": "Supabase: Angebot einfügen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2480, 220],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ergebniszusammenfassung erstellen\nconst alleItems = $input.all();\nlet importiert  = 0;\nlet fehler      = 0;\n\nfor (const item of alleItems) {\n  if (item.json.error || item.json.statusCode >= 400) {\n    fehler++;\n  } else {\n    importiert++;\n  }\n}\n\nconst duplikate = parseInt($('Duplikat prüfen').all().filter(i => i.json === true).length) || 0;\n\nreturn [{\n  json: {\n    importiert,\n    fehler,\n    duplikate,\n    nachricht: `Ingestion abgeschlossen: ${importiert} importiert, ${duplikate} Duplikate übersprungen, ${fehler} Fehler`\n  }\n}];\n"
+      },
+      "id": "zusammenfassung",
+      "name": "Zusammenfassung",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2700, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Webhook Antwort",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2920, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"*Angebote Ingestion abgeschlossen*\\n{{ $('Zusammenfassung').item.json.nachricht }}\"\n}",
+        "options": {}
+      },
+      "id": "slack-ingestion-summary",
+      "name": "Slack: Ingestion-Ergebnis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2920, 360],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Manueller Start": {
+      "main": [[{ "node": "Datenquelle: S1 API?", "type": "main", "index": 0 }]]
+    },
+    "Webhook Trigger": {
+      "main": [[{ "node": "Datenquelle: S1 API?", "type": "main", "index": 0 }]]
+    },
+    "Datenquelle: S1 API?": {
+      "main": [
+        [{ "node": "S1: Login für Ingestion", "type": "main", "index": 0 }],
+        [{ "node": "Manuelle Eingabe parsen", "type": "main", "index": 0 }]
+      ]
+    },
+    "S1: Login für Ingestion": {
+      "main": [[{ "node": "S1: Angebote abrufen", "type": "main", "index": 0 }]]
+    },
+    "S1: Angebote abrufen": {
+      "main": [[{ "node": "S1-Angebote normalisieren", "type": "main", "index": 0 }]]
+    },
+    "S1-Angebote normalisieren": {
+      "main": [[{ "node": "Quellen zusammenführen", "type": "main", "index": 0 }]]
+    },
+    "Manuelle Eingabe parsen": {
+      "main": [[{ "node": "Quellen zusammenführen", "type": "main", "index": 1 }]]
+    },
+    "Quellen zusammenführen": {
+      "main": [[{ "node": "Angebot serialisieren", "type": "main", "index": 0 }]]
+    },
+    "Angebot serialisieren": {
+      "main": [[{ "node": "Duplikat prüfen", "type": "main", "index": 0 }]]
+    },
+    "Duplikat prüfen": {
+      "main": [[{ "node": "Ist Duplikat?", "type": "main", "index": 0 }]]
+    },
+    "Ist Duplikat?": {
+      "main": [
+        [{ "node": "OpenAI: Embedding erstellen", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "OpenAI: Embedding erstellen": {
+      "main": [[{ "node": "Supabase Payload bauen", "type": "main", "index": 0 }]]
+    },
+    "Supabase Payload bauen": {
+      "main": [[{ "node": "Supabase: Angebot einfügen", "type": "main", "index": 0 }]]
+    },
+    "Supabase: Angebot einfügen": {
+      "main": [[{ "node": "Zusammenfassung", "type": "main", "index": 0 }]]
+    },
+    "Zusammenfassung": {
+      "main": [
+        [{ "node": "Webhook Antwort", "type": "main", "index": 0 }],
+        [{ "node": "Slack: Ingestion-Ergebnis", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "timezone": "Europe/Berlin"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "REPLACE_ME_INSTANCE_ID"
+  },
+  "tags": [
+    { "name": "Ingestion" },
+    { "name": "RAG" },
+    { "name": "Angebote" }
+  ],
+  "pinData": {}
+}
